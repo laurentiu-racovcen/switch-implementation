@@ -34,6 +34,18 @@ def send_bdpu_every_sec():
         # TODO Send BDPU every second if necessary
         time.sleep(1)
 
+def is_mac_unicast(mac_addr):
+    first_byte = mac_addr[:2]
+    first_byte_int = int(first_byte, 16)
+
+    # Get the last bit value of the first byte
+    last_bit = first_byte_int & 1
+
+    if last_bit == 0:
+        return True
+    else:
+        return False
+
 def main():
     # init returns the max interface number. Our interfaces
     # are 0, 1, 2, ..., init_ret value + 1
@@ -52,6 +64,9 @@ def main():
     # Printing interface names
     for i in interfaces:
         print(get_interface_name(i))
+
+    # Initialize MAC address -> Port Table
+    mac_table = {}
 
     while True:
         # Note that data is of type bytes([...]).
@@ -75,8 +90,35 @@ def main():
 
         print("Received frame of size {} on interface {}".format(length, interface), flush=True)
 
-        # TODO: Implement forwarding with learning
-        # TODO: Implement VLAN support
+        # ----- Forwarding with learning Implementation ----- #
+
+        # Add entry in MAC table
+        mac_table[src_mac] = interface
+        print(mac_table)
+
+        if is_mac_unicast(dest_mac):
+            print("IT'S UNICAST\n")
+            if dest_mac in mac_table.keys():
+                # Send the frame to the corresponding interface
+                print("dest MAC exists in the mac table! Forwarding...\n")
+                send_to_link(mac_table[dest_mac], data, length)
+                print("the packet has been forwarded!\n")
+            else:
+                print("dest MAC does NOT exist in the mac table!\n")
+                # Send the frame to all the other interfaces
+                for k in range(num_interfaces):
+                    if k != interface:
+                        send_to_link(k, data, length)
+        else:
+            print("IT'S NOT UNICAST! Sending to all the other interfaces...\n")
+            # Send the frame to all the other interfaces
+            for k in range(num_interfaces):
+                if k != interface:
+                    send_to_link(k, data, length)
+            print("The frame has been sent to all the other interfaces!\n")
+
+        # ----- VLAN support Implementation ----- #
+
         # TODO: Implement STP support
 
         # data is of type bytes.
