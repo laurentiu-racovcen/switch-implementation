@@ -4,15 +4,13 @@ import struct
 import wrapper
 import threading
 import time
-import numpy
 from wrapper import recv_from_any_link, send_to_link, get_switch_mac, get_interface_name
 
 def parse_ethernet_header(data):
     # Unpack the header fields from the byte array
-    #dest_mac, src_mac, ethertype = struct.unpack('!6s6sH', data[:14])
     dest_mac = data[0:6]
     src_mac = data[6:12]
-    
+
     # Extract ethertype. Under 802.1Q, this may be the bytes from the VLAN TAG
     ether_type = (data[12] << 8) + data[13]
 
@@ -26,7 +24,7 @@ def parse_ethernet_header(data):
     return dest_mac, src_mac, ether_type, vlan_id
 
 def create_vlan_tag(vlan_id):
-    # 0x8100 for the Ethertype for 802.1Q
+    # 0x8100 for the 802.1Q Ethertype
     # vlan_id & 0x0FFF ensures that only the last 12 bits are used
     return struct.pack('!H', 0x8200) + struct.pack('!H', vlan_id & 0x0FFF)
 
@@ -47,11 +45,47 @@ def is_mac_unicast(mac_addr):
     else:
         return False
 
+def send_unicast_frame(data, length, dst_int, src_vlan_id, dst_vlan_id):
+
+    if src_vlan_id == 'T':
+        # print("HAS VLAN TAG")
+        # The frame is VLAN-tagged (the frame comes from a trunk interface)
+
+        if dst_vlan_id == 'T':
+            # The destination interface is of trunk type, forward the same frame
+            send_to_link(dst_int, data, length)
+        else:
+            # check if the src host has the same VLAN as the dst host
+
+            # extract the src vlan id from the frame
+            src_host_vlan_id = data[14:16]
+            
+            if int.from_bytes(src_host_vlan_id, "big") == (ord(dst_vlan_id) - ord('0')):
+                # The destination interface is of access type, and the VLANs are the same
+                # so remove the dot1q field and send the frame
+                new_frame = data[0:12] + data[16:]
+                send_to_link(dst_int, new_frame, length - 4)
+            # else drop the packet
+    else:
+        # The frame is NOT VLAN-tagged (the frame comes from an access interface)
+
+        # If the destination interface is of trunk type, add the dot1q header
+        # and send the frame
+        if dst_vlan_id == 'T':
+            new_frame = data[0:12] + bytearray(struct.pack(">HH", 0x8200, ord(src_vlan_id)-ord('0'))) + data[12:14] + data[14:]
+            send_to_link(dst_int, new_frame, length + 4)
+        elif src_vlan_id == dst_vlan_id:
+            # If the destination interface has the same VLAN id as the source interface
+            # do not add the dot1q header
+            # Forward the same frame to the corresponding interface
+            send_to_link(dst_int, data, length)
+            # else drop the frame
+
 def main():
-    # init returns the max interface number. Our interfaces
-    # are 0, 1, 2, ..., init_ret value + 1
     switch_id = sys.argv[1]
 
+    # Init returns the max interface number.
+    # Our interfaces are 0, 1, 2, ..., num_interfaces + 1
     num_interfaces = wrapper.init(sys.argv[2:])
     interfaces = range(0, num_interfaces)
 
@@ -66,7 +100,7 @@ def main():
     for i in interfaces:
         print(get_interface_name(i))
 
-    # Initialize MAC address -> Port Table
+    # Initialize (MAC address -> Port) Table
     mac_table = {}
 
     # ----- VLAN support Implementation ----- #
@@ -88,179 +122,57 @@ def main():
 
     f.close()
 
+    # Process received frames
     while True:
-        # Note that data is of type bytes([...]).
-        # b1 = bytes([72, 101, 108, 108, 111])  # "Hello"
-        # b2 = bytes([32, 87, 111, 114, 108, 100])  # " World"
-        # b3 = b1[0:2] + b[3:4].
         interface, data, length = recv_from_any_link()
-
-        dest_mac, src_mac, ethertype, vlan_id = parse_ethernet_header(data)
+        dst_mac, src_mac, ethertype, src_vlan_id = parse_ethernet_header(data)
 
         # Print the MAC src and MAC dst in human readable format
-        dest_mac = ':'.join(f'{b:02x}' for b in dest_mac)
+        dst_mac = ':'.join(f'{b:02x}' for b in dst_mac)
         src_mac = ':'.join(f'{b:02x}' for b in src_mac)
-
+        create_vlan_tag
         # Note. Adding a VLAN tag can be as easy as
         # tagged_frame = data[0:12] + create_vlan_tag(10) + data[12:]
 
-        print(f'Destination MAC: {dest_mac}')
+        print(f'Destination MAC: {dst_mac}')
         print(f'Source MAC: {src_mac}')
         print(f'EtherType: {ethertype}')
 
         print("Received frame of size {} on interface {}".format(length, interface), flush=True)
 
-        # ----- Forwarding with learning Implementation ----- #
-
         # Add entry in MAC table
         mac_table[src_mac] = interface
         # print(mac_table)
 
-        src_int_name = get_interface_name(mac_table[src_mac])
-        src_int_vlan = interface_vlan[src_int_name]
+        if is_mac_unicast(dst_mac):
+            # The MAC address is unicast
+            src_int_name = get_interface_name(interface)
+            src_vlan_id = interface_vlan[src_int_name]
 
-        if is_mac_unicast(dest_mac):
-            # print("IT'S UNICAST\n")
-            if dest_mac in mac_table.keys():
-                # Check if the frame is permitted to be forwarded
-
-                # print("dest MAC exists in the mac table! Checking for VLAN...\n")
-
-                dst_int_name = get_interface_name(mac_table[dest_mac])
-                dst_int_vlan = interface_vlan[dst_int_name]
-
-                # print("ether type = ")
-                # print(ethertype)
-
-                # print("src vlan = ")
-                # print(src_int_vlan)
-
-                # print("dst vlan = ")
-                # print(dst_int_vlan)
-
-                if src_int_vlan == 'T':
-                    # print("HAS VLAN TAG")
-                    # The frame is VLAN-tagged (the frame comes from a trunk interface)
-
-                    if dst_int_vlan == 'T':
-                        # The destination interface is of trunk type, forward the same frame
-                        send_to_link(mac_table[dest_mac], data, length)
-                    else:
-                        # check if the src host has the same VLAN as the dst host
-
-                        # extract the src vlan id from the frame
-                        src_host_vlan_id = data[14:16]
-                        
-                        if int.from_bytes(src_host_vlan_id, "big") == (ord(dst_int_vlan) - ord('0')):
-                            # The destination interface is of access type, and the VLANs are the same
-                            # so remove the dot1q field and send the frame
-                            new_frame = data[0:12] + data[16:]
-                            send_to_link(mac_table[dest_mac], new_frame, length - 4)
-                        # else drop the packet
-                else:
-                    # The frame is NOT VLAN-tagged (the frame comes from an access interface)
-
-                    # If the destination interface is of trunk type, add the dot1q header
-                    # and send the frame
-                    if dst_int_vlan == 'T':
-                        new_frame = data[0:12] + bytearray(struct.pack(">HH", 0x8200, ord(src_int_vlan)-ord('0'))) + data[12:14] + data[14:]
-                        send_to_link(mac_table[dest_mac], new_frame, length + 4)
-                    elif src_int_vlan == dst_int_vlan:
-                        # If the destination interface has the same VLAN id as the source interface
-                        # do not add the dot1q header
-                        if src_int_vlan == dst_int_vlan:
-                            # Forward the same frame to the corresponding interface
-                            send_to_link(mac_table[dest_mac], data, length)
-                        # else drop the frame                
-
-                # send_to_link(mac_table[dest_mac], data, length)
-                # print("the packet has been forwarded!\n")
+            if dst_mac in mac_table.keys():
+                dst_int = mac_table[dst_mac]
+                dst_int_name = get_interface_name(dst_int)
+                dst_vlan_id = interface_vlan[dst_int_name]
+                send_unicast_frame(data, length, dst_int, src_vlan_id, dst_vlan_id)
             else:
+                # The destination MAC is NOT in the MAC table
                 # Send the frame to all the other interfaces within the same VLAN
                 for k in interfaces:
                     if (k != interface):
-                        if interface_vlan[src_int_name] == 'T':
-                            # the src interface is of trunk type
-                            if interface_vlan[get_interface_name(k)] == 'T':
-                                # dst interface is of trunk type
-                                # send unchanged frame
-                                send_to_link(k, data, length)
-
-                                # print("The frame has been sent to interface:")
-                                # print(get_interface_name(k))
-                            else:
-                                # dst interface is of access type
-                                # remove the VLAN tag and send the frame to host
-                                new_frame = data[0:12] + data[16:]
-                                vlan_id = data[14:16]
-                                if int.from_bytes(vlan_id, "big") == (ord(interface_vlan[get_interface_name(k)]) - ord('0')):
-                                    send_to_link(k, new_frame, length - 4)
-                                    # print("The frame has been sent to interface:")
-                                    # print(get_interface_name(k))
-                        else:
-                            # the src interface is of access type
-                            if interface_vlan[get_interface_name(k)] == 'T':
-                                # dst interface is of trunk type
-                                # add the dot1q header
-                                new_size = data[13] + 4
-                                new_frame = data[0:12] + bytearray(struct.pack(">HH", 0x8200, ord(src_int_vlan)-ord('0'))) + data[12:14] + data[14:]
-                                send_to_link(k, new_frame, length + 4)
-                                # print("The frame has been sent to interface:")
-                                # print(get_interface_name(k))
-                            else:
-                                # dst interface is of access type
-                                if src_int_vlan == interface_vlan[get_interface_name(k)]:
-                                    # send unchanged frame to host
-                                    send_to_link(k, data, length)
-
-                                    # print("The frame has been sent to interface:")
-                                    # print(get_interface_name(k))
-
+                        dst_int_name = get_interface_name(k)
+                        dst_vlan_id = interface_vlan[dst_int_name]
+                        send_unicast_frame(data, length, k, src_vlan_id, dst_vlan_id)
         else:
-            # print("IT'S NOT UNICAST. Sending to all the other interfaces within the same VLAN...\n")
+            # The MAC address is multicast
+            # Send the frame to all the other interfaces within the same VLAN
+            src_int_name = get_interface_name(interface)
+            src_vlan_id = interface_vlan[src_int_name]
 
-            # Send the frame to all the other interfaces with the same VLAN
             for k in interfaces:
                 if (k != interface):
-
-                    if interface_vlan[src_int_name] == 'T':
-                        # the src interface is of trunk type
-                        if interface_vlan[get_interface_name(k)] == 'T':
-                            # dst interface is of trunk type
-                            # send unchanged frame
-                            send_to_link(k, data, length)
-
-                            # print("The frame has been sent to interface:")
-                            # print(get_interface_name(k))
-                        else:
-                            # dst interface is of access type
-                            # remove the VLAN tag and send the frame to host
-                            new_frame = data[0:12] + data[16:]
-                            vlan_id = data[14:16]
-                            if int.from_bytes(vlan_id, "big") == (ord(interface_vlan[get_interface_name(k)]) - ord('0')):
-                                send_to_link(k, new_frame, length - 4)
-
-                                # print("The frame has been sent to interface:")
-                                # print(get_interface_name(k))
-                    else:
-                        # the src interface is of access type
-                        if interface_vlan[get_interface_name(k)] == 'T':
-                            # dst interface is of trunk type
-                            # add the dot1q header
-                            new_size = data[13] + 4
-                            new_frame = data[0:12] + bytearray(struct.pack(">HH", 0x8200, ord(src_int_vlan)-ord('0'))) + data[12:14] + data[14:]
-                            send_to_link(k, new_frame, length + 4)
-
-                            # print("The frame has been sent to interface:")
-                            # print(get_interface_name(k))
-                        else:
-                            # dst interface is of access type
-                            if src_int_vlan == interface_vlan[get_interface_name(k)]:
-                                # send unchanged frame to host
-                                send_to_link(k, data, length)
-
-                                # print("The frame has been sent to interface:")
-                                # print(get_interface_name(k))
+                    dst_int_name = get_interface_name(k)
+                    dst_vlan_id = interface_vlan[dst_int_name]
+                    send_unicast_frame(data, length, k, src_vlan_id, dst_vlan_id)
 
         # TODO: Implement STP support
 
