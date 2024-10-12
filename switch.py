@@ -47,20 +47,21 @@ def is_mac_unicast(mac_addr):
 
 def send_unicast_frame(data, length, dst_int, src_vlan_id, dst_vlan_id):
 
-    if src_vlan_id == 'T':
+    if src_vlan_id == -1:
         # print("HAS VLAN TAG")
         # The frame is VLAN-tagged (the frame comes from a trunk interface)
 
-        if dst_vlan_id == 'T':
+        if dst_vlan_id == -1:
             # The destination interface is of trunk type, forward the same frame
             send_to_link(dst_int, data, length)
+            print("sentt!")
         else:
             # check if the src host has the same VLAN as the dst host
 
             # extract the src vlan id from the frame
             src_host_vlan_id = data[14:16]
             
-            if int.from_bytes(src_host_vlan_id, "big") == (ord(dst_vlan_id) - ord('0')):
+            if int.from_bytes(src_host_vlan_id, "big") == dst_vlan_id:
                 # The destination interface is of access type, and the VLANs are the same
                 # so remove the dot1q field and send the frame
                 new_frame = data[0:12] + data[16:]
@@ -70,9 +71,9 @@ def send_unicast_frame(data, length, dst_int, src_vlan_id, dst_vlan_id):
         # The frame is NOT VLAN-tagged (the frame comes from an access interface)
 
         # If the destination interface is of trunk type, add the dot1q header
-        # and send the frame
-        if dst_vlan_id == 'T':
-            new_frame = data[0:12] + bytearray(struct.pack(">HH", 0x8200, ord(src_vlan_id)-ord('0'))) + data[12:14] + data[14:]
+        # and send the tagged frame
+        if dst_vlan_id == -1:
+            new_frame = data[0:12] + create_vlan_tag(src_vlan_id) + data[12:]
             send_to_link(dst_int, new_frame, length + 4)
         elif src_vlan_id == dst_vlan_id:
             # If the destination interface has the same VLAN id as the source interface
@@ -103,22 +104,25 @@ def main():
     # Initialize (MAC address -> Port) Table
     mac_table = {}
 
-    # ----- VLAN support Implementation ----- #
-
     # Read configuration file contents
     f = open("configs/switch" + switch_id + ".cfg", "r")
 
-    # For storing interface - VLAN/T associations
+    # For storing (interface -> VLAN/T) associations
     interface_vlan = {}
 
     priority = f.readline().strip()
 
     for line in f:
         elements = line.split()
-        interface_vlan[elements[0]] = elements[1]
+        if elements[1] == 'T':
+            # '-1' means a trunk VLAN type in "interface_vlan" dictionary
+            interface_vlan[elements[0]] = -1
+        else:
+            # store the VLAN id as integer, different from '-1'
+            interface_vlan[elements[0]] = int(elements[1])
 
     # print("priority=" + priority + "\n")
-    # print(interface_vlan)
+    print(interface_vlan)
 
     f.close()
 
@@ -130,7 +134,7 @@ def main():
         # Print the MAC src and MAC dst in human readable format
         dst_mac = ':'.join(f'{b:02x}' for b in dst_mac)
         src_mac = ':'.join(f'{b:02x}' for b in src_mac)
-        create_vlan_tag
+
         # Note. Adding a VLAN tag can be as easy as
         # tagged_frame = data[0:12] + create_vlan_tag(10) + data[12:]
 
@@ -142,7 +146,7 @@ def main():
 
         # Add entry in MAC table
         mac_table[src_mac] = interface
-        # print(mac_table)
+        print(mac_table)
 
         if is_mac_unicast(dst_mac):
             # The MAC address is unicast
@@ -154,6 +158,7 @@ def main():
                 dst_int_name = get_interface_name(dst_int)
                 dst_vlan_id = interface_vlan[dst_int_name]
                 send_unicast_frame(data, length, dst_int, src_vlan_id, dst_vlan_id)
+                print("gaagagaga")
             else:
                 # The destination MAC is NOT in the MAC table
                 # Send the frame to all the other interfaces within the same VLAN
@@ -162,6 +167,7 @@ def main():
                         dst_int_name = get_interface_name(k)
                         dst_vlan_id = interface_vlan[dst_int_name]
                         send_unicast_frame(data, length, k, src_vlan_id, dst_vlan_id)
+                        print("nuu")
         else:
             # The MAC address is multicast
             # Send the frame to all the other interfaces within the same VLAN
@@ -173,6 +179,7 @@ def main():
                     dst_int_name = get_interface_name(k)
                     dst_vlan_id = interface_vlan[dst_int_name]
                     send_unicast_frame(data, length, k, src_vlan_id, dst_vlan_id)
+                    print("ohhhhhhhhh")
 
         # TODO: Implement STP support
 
