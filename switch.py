@@ -6,13 +6,13 @@ import threading
 import time
 from wrapper import recv_from_any_link, send_to_link, get_switch_mac, get_interface_name
 
-# Initialize the variables for STP
+# Initialize the global variables for STP
 own_bridge_id = 0
 root_bridge_id = 0
 root_path_cost = 0
 root_port = -1
 
-# For storing (interface name -> trunk port state) associations
+# For storing (port name -> trunk port state) associations
 trunk_port_state = {}
 
 def parse_ethernet_header(data):
@@ -34,10 +34,11 @@ def parse_ethernet_header(data):
 
 def create_vlan_tag(vlan_id):
     # 0x8100 for the 802.1Q Ethertype
+    # Using 0x8200 to avoid VLAN filtering by Linux
     # vlan_id & 0x0FFF ensures that only the last 12 bits are used
     return struct.pack('!H', 0x8200) + struct.pack('!H', vlan_id & 0x0FFF)
 
-def get_bdpu_packet(root_bridge_id, root_path_cost, bridge_id, port_id):
+def get_bpdu_packet(root_bridge_id, root_path_cost, bridge_id, port_id):
     return (
         (0).to_bytes(2, "big") +                # Protocol Identifier
         (0).to_bytes(1, "big") +                # Protocol Version Identifier
@@ -54,38 +55,36 @@ def get_bdpu_packet(root_bridge_id, root_path_cost, bridge_id, port_id):
         (0).to_bytes(8, "big")                  # Padding
     )
 
-def is_bdpu_frame(frame):
-    bdpu_mac = int("01:80:C2:00:00:00".replace(":", ""), 16).to_bytes(6, "big")
-    if bdpu_mac == frame[:6]:
-        print("IS BDPU FRAME!")
+def is_bpdu_frame(frame):
+    bpdu_mac = int("01:80:C2:00:00:00".replace(":", ""), 16).to_bytes(6, "big")
+    if bpdu_mac == frame[:6]:
         return True
     return False
 
-def send_bdpu_every_sec():
+def send_bpdu_every_sec():
     while True:
-        print("root bridge id:")
-        print(root_bridge_id)
-        print("own bridge id:")
-        print(own_bridge_id)
-        print("trunks states:")
-        print(trunk_port_state)
         if root_bridge_id == own_bridge_id:
             for port in trunk_port_state:
-                # Creating BDPU packet
-                bdpu_packet = get_bdpu_packet(root_bridge_id, root_path_cost, own_bridge_id, port)
+                # Creating BPDU packet
+                bpdu_packet = get_bpdu_packet(root_bridge_id, root_path_cost, own_bridge_id, port)
 
                 # Adding LLC header
-                llc_packet = 0x42.to_bytes(1, "big") + 0x42.to_bytes(1, "big") + 0x03.to_bytes(1, "big") + bdpu_packet
+                llc_packet = (0x42.to_bytes(1, "big") + # DSAP
+                              0x42.to_bytes(1, "big") + # SSAP
+                              0x03.to_bytes(1, "big") + # Control field
+                              bpdu_packet)
 
                 # Adding Ethernet header
+                # For BPDU, set multicast MAC destination
                 dst_mac = int("01:80:C2:00:00:00".replace(":", ""), 16).to_bytes(6, "big")
-                src_mac = (0).to_bytes(6, "big")
+
+                # Set the source MAC address as the MAC address of this switch
+                src_mac = get_switch_mac()
+
+                # len(llc_packet)-8 because of the 8 bytes-padding at the end of the frame
                 eth_frame = dst_mac + src_mac + (len(llc_packet)-8).to_bytes(2, "big") + llc_packet
 
-                print("I am root bridge! Sending BDPU packets to all trunk ports...")
                 send_unicast_frame(eth_frame, len(eth_frame), port, -1, -1)
-        else:
-            print("I am not root bridge!")
         time.sleep(1)
 
 def is_mac_unicast(mac_addr):
@@ -102,58 +101,50 @@ def is_mac_unicast(mac_addr):
 
 def send_unicast_frame(data, length, dst_int, src_vlan_id, dst_vlan_id):
     if src_vlan_id == -1:
-        # The frame is VLAN-tagged / contains BDPU packet
-
+        # The frame is VLAN-tagged / contains BPDU packet.
         if dst_vlan_id == -1:
             # The destination interface is of trunk type, forward the same frame
             send_to_link(dst_int, data, length)
         else:
-            # Check if the src host has the same VLAN as the dst host
-
             # Extract the src vlan id from the frame
             src_host_vlan_id = data[14:16]
-            
+
+            # Check if the src host is in the same VLAN as the dst host
             if int.from_bytes(src_host_vlan_id, "big") == dst_vlan_id:
                 # The destination interface is of access type, and the VLANs are the same,
                 # so remove the dot1q field and send the frame
                 new_frame = data[0:12] + data[16:]
                 send_to_link(dst_int, new_frame, length - 4)
-            # else drop the packet
+            # else drop the frame
     else:
-        # The frame is NOT VLAN-tagged (the frame comes from an access interface)
-
+        # The frame is NOT VLAN-tagged (the frame comes from an access interface).
         # If the destination interface is of trunk type, add the dot1q header
         # and send the tagged frame
         if dst_vlan_id == -1:
             new_frame = data[0:12] + create_vlan_tag(src_vlan_id) + data[12:]
             send_to_link(dst_int, new_frame, length + 4)
         elif src_vlan_id == dst_vlan_id:
-            # If the destination interface has the same VLAN id as the source interface
+            # If the destination interface is in the same VLAN as the source interface,
             # do not add the dot1q header
             # Forward the same frame to the corresponding interface
             send_to_link(dst_int, data, length)
-            # else drop the frame
+        # else drop the frame
 
-def process_bdpu_frame(recv_port, data, length):
+def process_bpdu_frame(recv_port, data, length):
     global root_bridge_id, root_path_cost, root_port
 
-    # Extract BDPU data
+    # Extract BPDU data
     frame_root_bridge_id = int.from_bytes(data[22:30], "big")
     frame_root_path_cost = int.from_bytes(data[30:34], "big")
     frame_sender_bridge_id = int.from_bytes(data[34:42], "big")
 
-    print(frame_root_bridge_id)
-    print(root_bridge_id)
-    print(root_path_cost)
-
     if frame_root_bridge_id < root_bridge_id:
         if root_bridge_id == own_bridge_id:
-            # Block all the trunk ports except the recv port
+            # Block all the trunk ports, except the port
+            # where the frame came from
             for i in trunk_port_state:
                 if i != recv_port:
                     trunk_port_state[i] = "BLK"
-                    print("The following port has been blocked:")
-                    print(get_interface_name(i))
 
         # Update root_bridge_id and root_path_cost
         root_bridge_id = frame_root_bridge_id
@@ -165,27 +156,31 @@ def process_bdpu_frame(recv_port, data, length):
             trunk_port_state[root_port] = "LSN"
 
         # Update the BPDU frame and send it to all the other ports
-        new_bdpu_frame = (data[:30] + root_path_cost.to_bytes(4, "big") +
+        # The sender becomes this switch
+        new_bpdu_frame = (data[:30] + root_path_cost.to_bytes(4, "big") +
                           own_bridge_id.to_bytes(8, "big") + data[42:])
+
         for i in trunk_port_state:
             if i != root_port:
-                send_unicast_frame(new_bdpu_frame, len(new_bdpu_frame), i, -1, -1)
+                send_unicast_frame(new_bpdu_frame, len(new_bpdu_frame), i, -1, -1)
                 print("The new BPDU packet has been sent to:")
                 print(get_interface_name(i))
 
     elif frame_root_bridge_id == root_bridge_id:
+        # Check if the sender has a smaller cost to the Root Bridge
         if (recv_port == root_port) and (frame_root_path_cost + 10 < root_path_cost):
             root_path_cost = frame_root_path_cost + 10
         elif recv_port != root_port:
-            # This port does not lead to the root bridge
             if frame_root_path_cost > root_path_cost:
-                # so set it to DESIGNATED
-                if trunk_port_state[recv_port] != "LSN":
+                # This switch has a smaller cost to the Root Bridge
+                if trunk_port_state[recv_port] == "BLK":
+                    # No more discarding non-BPDU traffic on this port
+                    # Set the recv port to LISTENING (DESIGNATED)
                     trunk_port_state[recv_port] = "LSN"
 
     elif frame_sender_bridge_id == own_bridge_id:
         # A loop has been detected
-        # Blocking recv port
+        # Blocking the port where the frame came from
         trunk_port_state[recv_port] = "BLK"
 
     elif own_bridge_id == root_bridge_id:
@@ -197,7 +192,7 @@ def process_bdpu_frame(recv_port, data, length):
 def main():
     switch_id = sys.argv[1]
 
-    # Init returns the max interface number.
+    # init returns the max interface number.
     # Our interfaces are 0, 1, 2, ..., num_interfaces + 1
     num_interfaces = wrapper.init(sys.argv[2:])
     interfaces = range(0, num_interfaces)
@@ -205,16 +200,12 @@ def main():
     print("# Starting switch with id {}".format(switch_id), flush=True)
     print("[INFO] Switch MAC", ':'.join(f'{b:02x}' for b in get_switch_mac()))
 
-    # Using STP global variables
+    # Using global variables for STP
     global own_bridge_id, root_bridge_id, root_path_cost, trunk_port_state
 
-    # Create and start a new thread that deals with sending BDPU
-    t = threading.Thread(target=send_bdpu_every_sec)
+    # Create and start a new thread that deals with sending BPDU
+    t = threading.Thread(target=send_bpdu_every_sec)
     t.start()
-
-    # Printing interface names
-    for i in interfaces:
-        print(get_interface_name(i))
 
     # Initialize (MAC address -> Port) Table
     mac_table = {}
@@ -242,10 +233,6 @@ def main():
             # store the VLAN id as integer, different from '-1'
             interface_vlan[elements[0]] = int(elements[1])
 
-    print("priority=")
-    print(priority)
-    print(interface_vlan)
-
     f.close()
 
     # Initialize the variables for STP
@@ -253,29 +240,27 @@ def main():
     root_bridge_id = own_bridge_id
     root_path_cost = 0
 
-    print("trunk port states:")
-    print(trunk_port_state)
-
-    # The switch is considered to be the root bridge,
-    # so the trunk ports state is changed to "DESIGNATED"
+    # Initially, the switch considers itself to be the root bridge,
+    # so the trunk ports state is changed to LISTENING (DESIGNATED)
     if own_bridge_id == root_bridge_id:
         for port in trunk_port_state:
             trunk_port_state[port] = "LSN"
-    print("trunk port states after change:")
-    print(trunk_port_state)
 
     # Process received frames
     while True:
         interface, data, length = recv_from_any_link()
 
-        # Discard the frame if the port is BLOCKED
-        if interface in trunk_port_state:
+        # Discard the frame if the port is BLOCKED and is NOT a BPDU packet
+        if (interface in trunk_port_state) and (not is_bpdu_frame(data)):
             if trunk_port_state[interface] == "BLK":
                 continue
 
-        if (is_bdpu_frame(data)):
-            process_bdpu_frame(interface, data, length)
+        if (is_bpdu_frame(data)):
+            # The BPDU frame came from a trunk interface
+            process_bpdu_frame(interface, data, length)
+
         else:
+            # The non-BPDU frame came from an access interface
             dst_mac, src_mac, ethertype, src_vlan_id = parse_ethernet_header(data)
 
             # Print the MAC src and MAC dst in human readable format
@@ -304,7 +289,7 @@ def main():
                     send_unicast_frame(data, length, dst_int, src_vlan_id, dst_vlan_id)
                 else:
                     # The destination MAC is NOT in the MAC table
-                    # Send the frame to all the other interfaces within the same VLAN
+                    # Send the frame to all the other interfaces in the same VLAN
                     for k in interfaces:
                         if (k != interface):
                             dst_int_name = get_interface_name(k)
@@ -312,7 +297,7 @@ def main():
                             send_unicast_frame(data, length, k, src_vlan_id, dst_vlan_id)
             else:
                 # The MAC address is multicast
-                # Send the frame to all the other interfaces within the same VLAN
+                # Send the frame to all the other interfaces in the same VLAN
                 src_int_name = get_interface_name(interface)
                 src_vlan_id = interface_vlan[src_int_name]
 
