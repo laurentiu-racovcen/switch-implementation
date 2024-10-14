@@ -1,31 +1,64 @@
-Scheleton for the Switch implementation.
+1 2 3
 
-## Running
+# **Homework 1 - Switch Implementation**
 
-```bash
-sudo python3 checker/topo.py
-```
+>This project consists in implementing a switch that has 3 main functionalities: Switching Table, VLAN support, Spanning Tree Protocol (802.1d).
+The switch receives its details (priority and interface-VLAN associations) from a configuration file.
 
-This will open 9 terminals, 6 hosts and 3 for the switches. On the switch terminal you will run 
+The switch can receive frames on any of its ports, and depending on port states, the switch forwards, drops (or, in case of BPDU, it just analyzes) incoming frames. If the switch is the Root Bridge, it can also send BPDU packets to trunk ports. When the switch receives a frame that has the destination MAC address in the MAC Table, it forwards the frame to the destination interface. But when the switch does not have the destination MAC address in the MAC Table, it sends the frame to all the other interfaces in the same VLAN.
 
-```bash
-make run_switch SWITCH_ID=X # X is 0,1 or 2
-```
+To realize the given requirements, there have been used the following functions from the `wrapper.py` file: `init()`, `recv_from_any_link()`, `send_to_link()`, `get_switch_mac()`, `get_interface_name()`.
 
-The hosts have the following IP addresses.
-```
-host0 192.168.1.1
-host1 192.168.1.2
-host2 192.168.1.3
-host3 192.168.1.4
-host4 192.168.1.5
-host5 192.168.1.6
-```
+## **Table of contents**
 
-We will be testing using the ICMP. For example, from host0 we will run:
+1. ["main" function](#main-function)
+2. [Helper functions](#helper-functions)
+3. ["wrapper.py" functions](#wrapperpy-functions)
 
-```
-ping 192.168.1.2
-```
+## **"main" function**
 
-Note: We will use wireshark for debugging. From any terminal you can run `wireshark&`.
+**1.** Store the number of interfaces and the MAC of the switch
+
+**2.** Create and start a new thread that deals with sending BPDU
+
+**3.** Declare MAC Table, Interface-VLAN table and the global variables for STP
+
+**4.** Store (interface name - VLAN/T) associations in the `interface_vlan` dictionary and initialize trunk ports state to `BLOCKING`
+
+**5.** The switch considers itself to be the root bridge, so the trunk ports state is changed to `LISTENING`
+
+**6.** The switch continuously receives frames. If the MAC Table contains the frame's MAC destination, it forwards the frame to the port associated with the given destination MAC address; if not - it forwards the frame to all the other interfaces in the same VLAN.
+
+**7.** If the port where the frame was received is in the `BLOCKING` state and the frame does not contain a BPDU packet, the frame is discarded; else - the frame is processed by the switch.
+
+
+## **Helper functions**
+
+Check functions:
+- `"contains_bpdu_packet"` - checks if a frame contains a `BPDU` packet
+- `"is_mac_unicast"` - checks if a particular MAC address is unicast
+
+Creating / Parsing functions:
+
+- `"create_vlan_tag"` - creates the VLAN tag using a given VLAN id
+- `"get_bpdu_packet"` - creates a BPDU packet using `root_bridge_id`, `root_path_cost`, `own_bridge_id`, `port`
+- `"parse_ethernet_header"` - parses the byte array and returns: `dst_mac`, `src_mac`, `ethertype`, `src_vlan_id`
+
+Frame-sending functions:
+- `"send_bpdu_every_sec"` - continuously sends frames containing BPDU packets to the trunk ports if the switch is the Root Bridge
+- `"send_unicast_frame"` - sends a frame to a specific port, according to the source and destination VLAN type/ID
+
+Processing functions:
+- `"process_bpdu_frame"` - function that processes a received BPDU frame
+
+## **wrapper.py functions**
+- `"init"` - returns the number of interfaces of the switch
+- `"recv_from_any_link"` - receives frames from any switch interface
+- `"send_to_link"` - sends a frame to a certain switch interface
+- `"get_switch_mac"` - returns the MAC address of the switch
+- `"get_interface_name"` - returns the name of a switch interface
+
+​
+
+
+**(c) Racovcen Laurențiu**
