@@ -55,7 +55,7 @@ def get_bpdu_packet(root_bridge_id, root_path_cost, bridge_id, port_id):
         (0).to_bytes(8, "big")                  # Padding
     )
 
-def is_bpdu_frame(frame):
+def contains_bpdu_packet(frame):
     bpdu_mac = int("01:80:C2:00:00:00".replace(":", ""), 16).to_bytes(6, "big")
     if bpdu_mac == frame[:6]:
         return True
@@ -162,7 +162,7 @@ def process_bpdu_frame(recv_port, data, length):
 
         for i in trunk_port_state:
             if i != root_port:
-                send_unicast_frame(new_bpdu_frame, len(new_bpdu_frame), i, -1, -1)
+                send_unicast_frame(new_bpdu_frame, length, i, -1, -1)
                 print("The new BPDU packet has been sent to:")
                 print(get_interface_name(i))
 
@@ -251,11 +251,11 @@ def main():
         interface, data, length = recv_from_any_link()
 
         # Discard the frame if the port is BLOCKED and is NOT a BPDU packet
-        if (interface in trunk_port_state) and (not is_bpdu_frame(data)):
+        if (interface in trunk_port_state) and (not contains_bpdu_packet(data)):
             if trunk_port_state[interface] == "BLK":
                 continue
 
-        if (is_bpdu_frame(data)):
+        if (contains_bpdu_packet(data)):
             # The BPDU frame came from a trunk interface
             process_bpdu_frame(interface, data, length)
 
