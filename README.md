@@ -1,6 +1,4 @@
-1 2 3
-
-# **Homework 1 - Switch Implementation**
+# **Switch Implementation**
 
 >This project consists in implementing a switch that has 3 main functionalities: Switching Table, VLAN support, Spanning Tree Protocol (802.1d).
 The switch receives its details (priority and interface-VLAN associations) from a configuration file.

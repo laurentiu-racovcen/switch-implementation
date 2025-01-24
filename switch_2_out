@@ -1,0 +1,49 @@
+Initializing the switch
+# Starting switch with id 2
+[INFO] Switch MAC de:fe:c8:ed:02:04
+The new BPDU packet has been sent to:
+rr-0-2
+Destination MAC: de:ad:be:ef:00:01
+Source MAC: de:ad:be:ef:00:04
+EtherType: 2048
+Received frame of size 42 on interface 0
+{'de:ad:be:ef:00:04': 0}
+Destination MAC: ff:ff:ff:ff:ff:ff
+Source MAC: de:ad:be:ef:00:01
+EtherType: 2054
+Received frame of size 46 on interface 3
+{'de:ad:be:ef:00:04': 0, 'de:ad:be:ef:00:01': 3}
+Destination MAC: de:ad:be:ef:00:01
+Source MAC: de:ad:be:ef:00:04
+EtherType: 2054
+Received frame of size 42 on interface 0
+{'de:ad:be:ef:00:04': 0, 'de:ad:be:ef:00:01': 3}
+Destination MAC: de:ad:be:ef:00:04
+Source MAC: de:ad:be:ef:00:01
+EtherType: 2048
+Received frame of size 46 on interface 3
+{'de:ad:be:ef:00:04': 0, 'de:ad:be:ef:00:01': 3}
+Destination MAC: de:ad:be:ef:00:00
+Source MAC: de:ad:be:ef:00:05
+EtherType: 2048
+Received frame of size 42 on interface 1
+{'de:ad:be:ef:00:04': 0, 'de:ad:be:ef:00:01': 3, 'de:ad:be:ef:00:05': 1}
+Destination MAC: ff:ff:ff:ff:ff:ff
+Source MAC: de:ad:be:ef:00:00
+EtherType: 2054
+Received frame of size 46 on interface 3
+{'de:ad:be:ef:00:04': 0, 'de:ad:be:ef:00:01': 3, 'de:ad:be:ef:00:05': 1, 'de:ad:be:ef:00:00': 3}
+Destination MAC: de:ad:be:ef:00:00
+Source MAC: de:ad:be:ef:00:05
+EtherType: 2054
+Received frame of size 42 on interface 1
+{'de:ad:be:ef:00:04': 0, 'de:ad:be:ef:00:01': 3, 'de:ad:be:ef:00:05': 1, 'de:ad:be:ef:00:00': 3}
+Destination MAC: de:ad:be:ef:00:05
+Source MAC: de:ad:be:ef:00:00
+EtherType: 2048
+Received frame of size 46 on interface 3
+{'de:ad:be:ef:00:04': 0, 'de:ad:be:ef:00:01': 3, 'de:ad:be:ef:00:05': 1, 'de:ad:be:ef:00:00': 3}
+Destination MAC: de:ad:be:ef:00:09
+Source MAC: de:ad:be:ef:00:05
+EtherType: 2048
+Received frame of size 42 on interface 1
