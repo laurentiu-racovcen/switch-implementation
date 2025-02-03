@@ -5,7 +5,7 @@ The switch receives its details (priority and interface-VLAN associations) from 
 
 The switch can receive frames on any of its ports, and depending on port states, the switch forwards, drops (or, in case of BPDU, it just analyzes) incoming frames. If the switch is the Root Bridge, it can also send BPDU packets to trunk ports. When the switch receives a frame that has the destination MAC address in the MAC Table, it forwards the frame to the destination interface. But when the switch does not have the destination MAC address in the MAC Table, it sends the frame to all the other interfaces in the same VLAN.
 
-To realize the given requirements, there have been used the following functions from the `wrapper.py` file: `init()`, `recv_from_any_link()`, `send_to_link()`, `get_switch_mac()`, `get_interface_name()`.
+To fulfill the given requirements, there have been used the following functions from the `wrapper.py` file: `init()`, `recv_from_any_link()`, `send_to_link()`, `get_switch_mac()`, `get_interface_name()`.
 
 ## **Table of contents**
 
